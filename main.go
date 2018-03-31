@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"time"
 	"github.com/miekg/dns"
 )
 
@@ -95,14 +96,16 @@ func queryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("%s Request for <%s>\n", r.Method, parseHostFromQuery(query))
-
+	start := time.Now()
 	response, err := lookup(query)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+	elapsed := time.Now().Sub(start)
 
+	log.Printf("%s Request for <%s> (%s)\n", r.Method, parseHostFromQuery(query), elapsed.String())
+	
 	w.Header().Set("Content-Type", "application/dns-udpwireformat")
 	w.Write(response)
 }

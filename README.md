@@ -29,23 +29,12 @@ To get this going in Firefox, you need the following:
 I had to restart Firefox before it picked up these settings. You should see something like this appear:
 
 ```
-2018/03/31 13:41:25 POST Request for <cdn-traffic-director.krxd.net./IN/AAAA>
-2018/03/31 13:41:25 POST Request for <cdn-fastly.krxd.net./IN/AAAA>
-2018/03/31 13:41:25 POST Request for <cdn-fastly.krxd.net.c.global-ssl.fastly.net./IN/AAAA>
-2018/03/31 13:41:25 POST Request for <cdn-traffic-director.krxd.net./IN/A>
-2018/03/31 13:41:25 POST Request for <cdn-fastly.krxd.net./IN/A>
-2018/03/31 13:41:25 POST Request for <cdn-fastly.krxd.net.c.global-ssl.fastly.net./IN/A>
-2018/03/31 13:41:36 POST Request for <www.telegraaf.nl./IN/A>
-2018/03/31 13:41:36 POST Request for <www.telegraaf.nl./IN/AAAA>
-2018/03/31 13:41:37 POST Request for <tmgonlinemedia.nl./IN/A>
-2018/03/31 13:41:37 POST Request for <tmgonlinemedia.nl./IN/AAAA>
-2018/03/31 13:41:37 POST Request for <cd.tnet.nl./IN/A>
-2018/03/31 13:41:37 POST Request for <cd.tnet.nl./IN/AAAA>
-2018/03/31 13:41:41 POST Request for <ocsp.pki.goog./IN/AAAA>
-2018/03/31 13:41:41 POST Request for <ocsp.pki.goog./IN/A>
-2018/03/31 13:41:41 POST Request for <www3.l.google.com./IN/A>
-2018/03/31 13:41:41 POST Request for <www3.l.google.com./IN/AAAA>
-2018/03/31 13:41:47 POST Request for <accounts.tnet.nl./IN/A>
+2018/03/31 13:47:31 POST Request for <golang.org./IN/A> (592.183µs)
+2018/03/31 13:47:31 POST Request for <golang.org./IN/AAAA> (2.513745ms)
+2018/03/31 13:47:31 POST Request for <golang.org./IN/A> (812.055µs)
+2018/03/31 13:47:31 POST Request for <golang.org./IN/AAAA> (787.912µs)
+2018/03/31 13:47:48 POST Request for <blog.golang.org./IN/AAAA> (206.335515ms)
+2018/03/31 13:47:49 POST Request for <blog.golang.org./IN/A> (237.966346ms)
 ```
 
 Enjoy.
