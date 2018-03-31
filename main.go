@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"net"
 	"net/http"
 )
@@ -37,7 +38,6 @@ func lookup(query []byte) ([]byte, error) {
 }
 
 func queryHandler(w http.ResponseWriter, r *http.Request) {
-	println("Received a query")
 	dns := r.URL.Query().Get("dns")
 	if dns == "" {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -49,6 +49,8 @@ func queryHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
+
+	println(hex.Dump(query))
 
 	response, err := lookup(query)
 	if err != nil {
