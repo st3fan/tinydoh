@@ -6,9 +6,12 @@ package main
 
 import (
 	"encoding/base64"
-	"encoding/hex"
+	"fmt"
+	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
+	"github.com/miekg/dns"
 )
 
 func lookup(query []byte) ([]byte, error) {
@@ -37,20 +40,62 @@ func lookup(query []byte) ([]byte, error) {
 	return buffer[:n], nil
 }
 
+func parseHostFromQuery(query []byte) string {
+	msg := &dns.Msg{}
+	if err := msg.Unpack(query); err != nil {
+		return "<unpack-error>"
+	}
+	s := ""
+	for i := 0; i < len(msg.Question); i++ {
+		if len(s) != 0 {
+			s += ", "
+		}
+		n := msg.Question[i].Name
+		c := dns.Class(msg.Question[i].Qclass).String()
+		t := dns.Type(msg.Question[i].Qtype).String()
+		s += fmt.Sprintf("%s/%s/%s", n, c, t)
+	}
+	return s
+}
+
 func queryHandler(w http.ResponseWriter, r *http.Request) {
-	dns := r.URL.Query().Get("dns")
-	if dns == "" {
+	var query []byte
+
+	switch r.Method {
+	case "GET":		
+		encoded := r.URL.Query().Get("dns")
+		if encoded == "" {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+		
+		dns, err := base64.RawURLEncoding.DecodeString(encoded)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		query = dns
+	case "POST":
+		if r.Header.Get("Content-Type") != "application/dns-udpwireformat" {
+			http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
+			return			
+		}
+		
+		defer r.Body.Close()
+
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return			
+		}
+		query = body
+	default:
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
-	query, err := base64.RawURLEncoding.DecodeString(dns)
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-		return
-	}
-
-	println(hex.Dump(query))
+	log.Printf("%s Request for <%s>\n", r.Method, parseHostFromQuery(query))
 
 	response, err := lookup(query)
 	if err != nil {
