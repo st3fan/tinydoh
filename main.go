@@ -114,7 +114,7 @@ func (s *server) queryHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if e, ok := err.(net.Error); ok && e.Timeout() {
 			if s.verbose {
-				log.Printf("%s <%s> (%s) Timeout\n", r.Method, parseHostFromQuery(query), elapsed)
+				log.Printf("%s <%s> (timeout)\n", r.Method, parseHostFromQuery(query))
 			}
 			http.Error(w, http.StatusText(http.StatusRequestTimeout), http.StatusRequestTimeout)
 		} else if err != nil {
