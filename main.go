@@ -5,28 +5,33 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
 	"time"
+
 	"github.com/miekg/dns"
 )
 
-func lookup(query []byte) ([]byte, error) {
-	serverAddress, err := net.ResolveUDPAddr("udp", "127.0.0.1:53")
-	if err != nil {
-		return nil, err
-	}
-
-	conn, err := net.DialUDP("udp", nil, serverAddress)
+func (s *server) lookup(query []byte) ([]byte, error) {
+	conn, err := net.DialUDP("udp", nil, s.upstream)
 	if err != nil {
 		return nil, err
 	}
 
 	defer conn.Close()
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(s.timeout))
+	defer cancel()
+
+	if d, ok := ctx.Deadline(); ok && !d.IsZero() {
+		conn.SetDeadline(d)
+	}
 
 	if _, err := conn.Write(query); err != nil {
 		return nil, err
@@ -59,17 +64,23 @@ func parseHostFromQuery(query []byte) string {
 	return s
 }
 
-func queryHandler(w http.ResponseWriter, r *http.Request) {
+type server struct {
+	verbose  bool
+	upstream *net.UDPAddr
+	timeout  time.Duration
+}
+
+func (s *server) queryHandler(w http.ResponseWriter, r *http.Request) {
 	var query []byte
 
 	switch r.Method {
-	case "GET":		
+	case "GET":
 		encoded := r.URL.Query().Get("dns")
 		if encoded == "" {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
-		
+
 		dns, err := base64.RawURLEncoding.DecodeString(encoded)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -80,15 +91,15 @@ func queryHandler(w http.ResponseWriter, r *http.Request) {
 	case "POST":
 		if r.Header.Get("Content-Type") != "application/dns-udpwireformat" {
 			http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
-			return			
+			return
 		}
-		
+
 		defer r.Body.Close()
 
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return			
+			return
 		}
 		query = body
 	default:
@@ -97,22 +108,41 @@ func queryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	response, err := lookup(query)
+	response, err := s.lookup(query)
 	if err != nil {
+		log.Printf("%s Request for <%s> %s\n", r.Method, parseHostFromQuery(query), err.Error())
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 	elapsed := time.Now().Sub(start)
 
-	log.Printf("%s Request for <%s> (%s)\n", r.Method, parseHostFromQuery(query), elapsed.String())
-	
+	if s.verbose {
+		log.Printf("%s Request for <%s> (%s)\n", r.Method, parseHostFromQuery(query), elapsed.String())
+	}
+
 	w.Header().Set("Content-Type", "application/dns-udpwireformat")
 	w.Write(response)
 }
 
 func main() {
-	http.HandleFunc("/dns-query", queryHandler)
+	verbose := flag.Bool("verbose", false, "enable verbose logging")
+	upstream := flag.String("upstream", "127.0.0.1:53", "upstream dns server")
+	timeout := flag.Duration("timeout", 2500*time.Millisecond, "query timeout")
+	flag.Parse()
+
+	addr, err := net.ResolveUDPAddr("udp", *upstream)
+	if err != nil {
+		log.Fatalf("Failed to lookup upstream dns server: %s\n", err)
+	}
+
+	srv := &server{
+		verbose:  *verbose,
+		upstream: addr,
+		timeout:  *timeout,
+	}
+
+	http.HandleFunc("/dns-query", srv.queryHandler)
 	if err := http.ListenAndServe(":9091", nil); err != nil {
-		panic(err)
+		log.Fatalf("Failed to start web server: %s\n", err)
 	}
 }
