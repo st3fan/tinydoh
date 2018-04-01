@@ -109,15 +109,25 @@ func (s *server) queryHandler(w http.ResponseWriter, r *http.Request) {
 
 	start := time.Now()
 	response, err := s.lookup(query)
-	if err != nil {
-		log.Printf("%s Request for <%s> %s\n", r.Method, parseHostFromQuery(query), err.Error())
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
-	}
 	elapsed := time.Now().Sub(start)
 
+	if err != nil {
+		if e, ok := err.(net.Error); ok && e.Timeout() {
+			if s.verbose {
+				log.Printf("%s <%s> (%s) Timeout\n", r.Method, parseHostFromQuery(query), elapsed)
+			}
+			http.Error(w, http.StatusText(http.StatusRequestTimeout), http.StatusRequestTimeout)
+		} else if err != nil {
+			if s.verbose {
+				log.Printf("%s <%s> (%s) %s\n", r.Method, parseHostFromQuery(query), elapsed, err.Error())
+			}
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		}
+		return
+	}
+
 	if s.verbose {
-		log.Printf("%s Request for <%s> (%s)\n", r.Method, parseHostFromQuery(query), elapsed.String())
+		log.Printf("%s <%s> (%s)\n", r.Method, parseHostFromQuery(query), elapsed)
 	}
 
 	w.Header().Set("Content-Type", "application/dns-udpwireformat")
