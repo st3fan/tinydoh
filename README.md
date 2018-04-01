@@ -18,7 +18,7 @@ my.home.server.com {
 }
 ```
 
-I then run the server in a *tmux* session simply with `go run main.go`. This is obviously not production ready, it is an experiment / exploration.
+I then run the server in a *tmux* session simply with `go run main.go -verbose`. This is obviously not production ready, it is an experiment / exploration.
 
 To get this going in Firefox, you need the following:
 
