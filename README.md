@@ -2,8 +2,10 @@
 
 *Stefan Arentz, April 2018*
 
-This is a tiny and minimal implementation of [draft-ietf-doh-dns-over-https](https://datatracker.ietf.org/doc/draft-ietf-doh-dns-over-https). It only supports `GET` requests and it is hardcoded to forward incoming DNS requests to `127.0.0.1:53`. This means you need to have a DNS server running on the machine where you run this service. Personally I like `apt-get install pdns-recursor`.
+This is a tiny and minimal implementation of [draft-ietf-doh-dns-over-https](https://datatracker.ietf.org/doc/draft-ietf-doh-dns-over-https).
 
+By default it forwards incoming DNS requests to `127.0.0.1:53`. This means you need to have a DNS server running on the machine where you run this service. Personally I like `apt-get install pdns-recursor`. You can also use the `-upstream` argument to use a different dns server.
+ 
 To use this in Firefox, you will have to deploy this to a HTTPS server. I use Caddy, with a config like this:
 
 ```
