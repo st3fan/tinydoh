@@ -7,22 +7,37 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"flag"
 	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
+	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/domainr/dnsr"
 	"github.com/miekg/dns"
 )
 
 type server struct {
 	verbose  bool
-	resolver *dnsr.Resolver
 	upstream *net.UDPAddr
 	timeout  time.Duration
+	resolver *dnsr.Resolver
+}
+
+// a global resolver only used by lambda
+var resolver *dnsr.Resolver
+
+func init() {
+	// when running as lambda, create the resolver in init with a
+	// fixed cache size to have it persist between runs
+	if os.Getenv("LAMBDA_TASK_ROOT") != "" {
+		resolver = dnsr.NewWithTimeout(1000000, 2500*time.Millisecond)
+	}
 }
 
 func (s *server) upstreamLookup(query string) ([]byte, error) {
@@ -133,7 +148,7 @@ func (s *server) queryHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		// resolve the query using the internal resolver
-		rrs, err := s.resolver.ResolveErr(n, t)
+		rrs, err := resolver.ResolveErr(n, t)
 		elapsed = time.Now().Sub(start)
 		if err == dnsr.NXDOMAIN {
 			err = nil
@@ -168,28 +183,115 @@ func (s *server) queryHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(packed)
 }
 
-func main() {
-	verbose := flag.Bool("verbose", false, "enable verbose logging")
-	capacity := flag.Int("capacity", 1000000, "capacity of the resolver cache")
-	upstream := flag.String("upstream", "", "upstream dns server (eg. '127.0.0.1:53'). If not set, use internal resolver.")
-	timeout := flag.Duration("timeout", 2500*time.Millisecond, "query timeout")
-	flag.Parse()
-
-	srv := &server{
-		verbose:  *verbose,
-		resolver: dnsr.NewWithTimeout(*capacity, *timeout),
-		timeout:  *timeout,
-	}
-	if *upstream != "" {
-		addr, err := net.ResolveUDPAddr("udp", *upstream)
-		if err != nil {
-			log.Fatalf("Failed to lookup upstream dns server: %s\n", err)
+// LambdaHandler processes the request using the AWS Lambda framework. It only supports the internal
+// resolver and has a fixed cache size.
+func LambdaHandler(r events.APIGatewayProxyRequest) (resp events.APIGatewayProxyResponse, err error) {
+	var (
+		n, t     string
+		response dns.Msg
+		packed   []byte
+		elapsed  time.Duration
+	)
+	switch r.HTTPMethod {
+	case "GET":
+		if r.QueryStringParameters["dns"] == "" {
+			err = errors.New("missing dns query parameter in GET request")
+			log.Println(err)
+			return events.APIGatewayProxyResponse{StatusCode: http.StatusBadRequest, Body: err.Error()}, err
 		}
-		srv.upstream = addr
+		decoded, err := base64.RawURLEncoding.DecodeString(r.QueryStringParameters["dns"])
+		if err != nil {
+			log.Println(err)
+			return events.APIGatewayProxyResponse{StatusCode: http.StatusBadRequest, Body: err.Error()}, err
+		}
+		n = string(decoded)
+		t = "A"
+	case "POST":
+		if r.Headers["content-type"] != "application/dns-udpwireformat" {
+			err = errors.New("unsupported media type, expected application/dns-udpwireformat")
+			log.Println(err)
+			return events.APIGatewayProxyResponse{StatusCode: http.StatusUnsupportedMediaType, Body: err.Error()}, err
+		}
+		// parse the dns message
+		msg := &dns.Msg{}
+		if err := msg.Unpack([]byte(r.Body)); err != nil {
+			log.Println(err)
+			return events.APIGatewayProxyResponse{StatusCode: http.StatusBadRequest, Body: err.Error()}, err
+		}
+		if len(msg.Question) != 1 {
+			err = errors.New("DoH only supports single queries")
+			log.Println(err)
+			return events.APIGatewayProxyResponse{StatusCode: http.StatusBadRequest, Body: err.Error()}, err
+		}
+		n = msg.Question[0].Name
+		t = dns.Type(msg.Question[0].Qtype).String()
+	default:
+		err = errors.New("unsupported http method")
+		log.Println(err)
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusBadRequest, Body: err.Error()}, err
 	}
 
-	http.HandleFunc("/dns-query", srv.queryHandler)
-	if err := http.ListenAndServe(":9091", nil); err != nil {
-		log.Fatalf("Failed to start web server: %s\n", err)
+	// resolve the query
+	start := time.Now()
+	// resolve the query using the internal resolver
+	rrs, err := resolver.ResolveErr(n, t)
+	elapsed = time.Now().Sub(start)
+	if err == dnsr.NXDOMAIN {
+		err = nil
+	}
+	if err != nil {
+		log.Printf("%s Request for <%s/%s> %s\n", r.HTTPMethod, n, t, err.Error())
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError, Body: err.Error()}, err
+	}
+
+	for _, rr := range rrs {
+		newRR, err := dns.NewRR(rr.String())
+		if err != nil {
+			log.Println(err)
+			return events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError, Body: err.Error()}, err
+		}
+
+		response.Answer = append(response.Answer, newRR)
+	}
+	packed, err = response.Pack()
+	if err != nil {
+		log.Println(err)
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError, Body: err.Error()}, err
+	}
+	log.Printf("%s Request for <%s/%s> (%s)\n", r.HTTPMethod, n, t, elapsed.String())
+	resp.Headers = make(map[string]string)
+	resp.Headers["Content-Type"] = "application/dns-udpwireformat"
+	resp.StatusCode = http.StatusOK
+	resp.Body = string(packed)
+	return
+}
+
+func main() {
+	if os.Getenv("LAMBDA_TASK_ROOT") != "" {
+		lambda.Start(LambdaHandler)
+	} else {
+		verbose := flag.Bool("verbose", false, "enable verbose logging")
+		capacity := flag.Int("capacity", 1000000, "capacity of the resolver cache")
+		upstream := flag.String("upstream", "", "upstream dns server (eg. '127.0.0.1:53'). If not set, use internal resolver.")
+		timeout := flag.Duration("timeout", 2500*time.Millisecond, "query timeout")
+		flag.Parse()
+
+		srv := &server{
+			verbose:  *verbose,
+			resolver: dnsr.NewWithTimeout(*capacity, *timeout),
+			timeout:  *timeout,
+		}
+		if *upstream != "" {
+			addr, err := net.ResolveUDPAddr("udp", *upstream)
+			if err != nil {
+				log.Fatalf("Failed to lookup upstream dns server: %s\n", err)
+			}
+			srv.upstream = addr
+		}
+
+		http.HandleFunc("/dns-query", srv.queryHandler)
+		if err := http.ListenAndServe(":9091", nil); err != nil {
+			log.Fatalf("Failed to start web server: %s\n", err)
+		}
 	}
 }
