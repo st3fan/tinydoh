@@ -148,7 +148,7 @@ func (s *server) queryHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		// resolve the query using the internal resolver
-		rrs, err := resolver.ResolveErr(n, t)
+		rrs, err := s.resolver.ResolveErr(n, t)
 		elapsed = time.Now().Sub(start)
 		if err == dnsr.NXDOMAIN {
 			err = nil
@@ -177,7 +177,7 @@ func (s *server) queryHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if s.verbose {
-		log.Printf("%s Request for <%s/%s> (%s)\n", r.Method, n, t, elapsed.String())
+		log.Printf("%s request for <%s/%s> (%s). base64 response: %s", r.Method, n, t, elapsed.String(), base64.StdEncoding.EncodeToString(packed))
 	}
 	w.Header().Set("Content-Type", "application/dns-udpwireformat")
 	w.Write(packed)
